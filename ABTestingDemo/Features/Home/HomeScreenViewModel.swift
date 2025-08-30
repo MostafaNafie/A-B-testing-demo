@@ -46,7 +46,7 @@ class HomeScreenViewModel: ObservableObject {
         isRefreshing = true
 
         Task {
-            await abTestManager.refresh()
+            await abTestManager.forceRefresh()
 
             await MainActor.run {
                 isRefreshing = false
