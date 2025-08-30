@@ -11,7 +11,7 @@ import FirebaseRemoteConfig
 import FirebaseAnalytics
 
 /// Concrete Firebase implementation of ABTestingManager
-final class FirebaseABTestingManager: ObservableObject {
+final class FirebaseABTestingManager {
 
     // MARK: - Properties
     private let remoteConfig = RemoteConfig.remoteConfig()
