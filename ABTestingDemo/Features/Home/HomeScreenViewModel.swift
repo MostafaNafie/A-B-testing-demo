@@ -8,7 +8,6 @@
 import SwiftUI
 import Combine
 
-@MainActor
 class HomeScreenViewModel: ObservableObject {
     private var abTestManager = FirebaseABTestingManager.shared
     private var cancellables = Set<AnyCancellable>()
@@ -21,18 +20,12 @@ class HomeScreenViewModel: ObservableObject {
     @Published var buttonColor = "blue"
     @Published var buttonText = "Get Started"
     @Published var welcomeMessage = "Welcome to our app!"
-    
+
     init() {
-        loadABTestValues()
-        setupABTestObserver()
-    }
-    
-    // MARK: - Public Methods
-    func onAppear() {
-        loadABTestValues()
         setupABTestObserver()
     }
 
+    // MARK: - Public Methods
     func welcomeMessageOnAppear() {
         trackWelcomeMessageImpression()
     }
@@ -63,21 +56,21 @@ class HomeScreenViewModel: ObservableObject {
 }
 
 private extension HomeScreenViewModel {
+    func setupABTestObserver() {
+        abTestManager.valuesUpdated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.loadABTestValues()
+            }
+            .store(in: &cancellables)
+    }
+
     func loadABTestValues() {
         buttonColor = abTestManager.getString(for: ABTestConfiguration.buttonColor).value
         buttonText = abTestManager.getString(for: ABTestConfiguration.buttonText).value
         welcomeMessage = abTestManager.getString(for: ABTestConfiguration.welcomeMessage).value
         featureEnabled = abTestManager.getBool(for: ABTestConfiguration.featureEnabled).value
         maxItems = abTestManager.getInt(for: ABTestConfiguration.maxItems).value
-    }
-
-    func setupABTestObserver() {
-        abTestManager.valuesUpdated
-            .receive(on: DispatchQueue.main)
-            .sink {
-                self.loadABTestValues()
-            }
-            .store(in: &cancellables)
     }
 }
 

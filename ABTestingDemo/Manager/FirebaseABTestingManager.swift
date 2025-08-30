@@ -16,8 +16,7 @@ final class FirebaseABTestingManager {
     // MARK: - Properties
     private let remoteConfig = RemoteConfig.remoteConfig()
     private let valuesSubject = PassthroughSubject<Void, Never>()
-    private var notificationObserver: NSObjectProtocol?
-    
+
     var valuesUpdated: AnyPublisher<Void, Never> {
         valuesSubject.eraseToAnyPublisher()
     }
@@ -27,72 +26,13 @@ final class FirebaseABTestingManager {
     // MARK: - Initialization
     private init() {
         setupRemoteConfig()
-        setupRemoteConfigObserver()
-    }
-
-    /// Setup Remote Config with default values and fetch settings
-    private func setupRemoteConfig() {
-        let remoteConfig = RemoteConfig.remoteConfig()
-
-        // Configure fetch settings
-        let settings = RemoteConfigSettings()
-        settings.minimumFetchInterval = 0 // For development - set to 3600 for production
-        remoteConfig.configSettings = settings
-
-        Task {
-            // Example of setting custom user properties
-            try? await remoteConfig.setCustomSignals(["role": "agent"])
-        }
-
-        // Fetch and activate config
-        remoteConfig.fetchAndActivate { status, error in
-            if let error = error {
-                print("Firebase Remote Config fetch failed: \(error)")
-                return
-            }
-
-            switch status {
-            case .successFetchedFromRemote:
-                print("Firebase Remote Config fetched from remote")
-                // Notify that Remote Config values have been updated
-                NotificationCenter.default.post(name: .remoteConfigUpdated, object: nil)
-            case .successUsingPreFetchedData:
-                print("Firebase Remote Config using pre-fetched data")
-                // Notify that Remote Config values are ready
-                NotificationCenter.default.post(name: .remoteConfigUpdated, object: nil)
-            default:
-                print("Firebase Remote Config fetch completed with status: \(status)")
-                NotificationCenter.default.post(name: .remoteConfigUpdated, object: nil)
-            }
-        }
-    }
-
-    private func setupRemoteConfigObserver() {
-        // Observe Remote Config value changes
-        notificationObserver = NotificationCenter.default.addObserver(
-            forName: .remoteConfigUpdated,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            print("🔄 Remote Config updated - triggering valuesUpdated publisher")
-            self?.valuesSubject.send()
-        }
-    }
-    
-    deinit {
-        if let observer = notificationObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
     }
     
     // MARK: - ABTestingManager Implementation
     
     func getString(for test: StringABTest) -> ABTestVariant<String> {
-        let configValue = remoteConfig.configValue(forKey: test.key.rawValue)
-        let value = configValue.stringValue
+        let value = remoteConfig.configValue(forKey: test.key.rawValue).stringValue
         let experimentInfo = getExperimentInfo(for: test.key)
-
-        print(">>> Config for \(test.key.rawValue): '\(configValue.stringValue)' (source: \(configValue.source))")
 
         return ABTestVariant(
             value: value,
@@ -113,8 +53,7 @@ final class FirebaseABTestingManager {
     }
     
     func getInt(for test: IntABTest) -> ABTestVariant<Int> {
-        let configValue = remoteConfig.configValue(forKey: test.key.rawValue)
-        let value = configValue.numberValue.intValue
+        let value = remoteConfig.configValue(forKey: test.key.rawValue).numberValue.intValue
         let experimentInfo = getExperimentInfo(for: test.key)
         
         return ABTestVariant(
@@ -125,33 +64,7 @@ final class FirebaseABTestingManager {
     }
     
     func refresh() async {
-        do {
-            let status = try await remoteConfig.fetchAndActivate()
-            
-            DispatchQueue.main.async { [weak self] in
-                print("🔄 Manual refresh - triggering valuesUpdated publisher")
-                self?.valuesSubject.send()
-            }
-            
-            switch status {
-            case .successFetchedFromRemote:
-                print("Firebase Remote Config refreshed from remote")
-            case .successUsingPreFetchedData:
-                print("Firebase Remote Config using cached data")
-            default:
-                print("Firebase Remote Config refresh completed with status: \(status)")
-            }
-        } catch {
-            print("Firebase Remote Config refresh failed: \(error)")
-        }
-    }
-    
-    /// Manually trigger the valuesUpdated publisher (useful for initial load)
-    func triggerUpdate() {
-        DispatchQueue.main.async { [weak self] in
-            print("🔄 Manual trigger - sending valuesUpdated")
-            self?.valuesSubject.send()
-        }
+        await fetchAndActivateConfig()
     }
     
     func trackEvent(for key: ABTestKey, variant: String, action: String) {
@@ -170,10 +83,59 @@ final class FirebaseABTestingManager {
             "event_type": action
         ])
     }
+}
+
+// MARK: - Private Methods
+private extension FirebaseABTestingManager {
+    /// Setup Remote Config with default values and fetch settings
+    func setupRemoteConfig() {
+        // Configure fetch settings
+        let settings = RemoteConfigSettings()
+        settings.minimumFetchInterval = 0 // For development - set to 3600 for production
+        remoteConfig.configSettings = settings
+
+        Task {
+            // Setting custom user properties
+            try? await remoteConfig.setCustomSignals(["role": "agent"])
+            // Fetch and activate config
+            await fetchAndActivateConfig()
+        }
+    }
+
+    func fetchAndActivateConfig() async {
+        do {
+            print("⏳ Fetching Values from Firebase Remote Config...")
+
+            let status = try await remoteConfig.fetchAndActivate()
+
+            switch status {
+                case .successFetchedFromRemote:
+                    print("✅ Firebase Remote Config fetched from remote and cached")
+                case .successUsingPreFetchedData:
+                    print("📱 Firebase Remote Config using cached data")
+                default:
+                    print("🔄 Firebase Remote Config fetch completed with status: \(status)")
+            }
+
+            print("🔄 Remote Config updated - triggering valuesUpdated publisher")
+            valuesSubject.send()
+
+            #if DEBUG
+            // Log all remote keys for debugging
+            let keys = remoteConfig.allKeys(from: .remote)
+            print("📋 Remote Config Keys (\(keys.count) total):")
+            for key in keys {
+                let val = remoteConfig.configValue(forKey: key)
+                print("  • \(key) = \(val.stringValue)")
+            }
+            #endif
+
+        } catch {
+            print("❌ Firebase Remote Config fetch failed: \(error)")
+        }
+    }
     
-    // MARK: - Private Methods
-    
-    private func getExperimentInfo(for key: ABTestKey) -> (variantName: String, experimentId: String?) {
+    func getExperimentInfo(for key: ABTestKey) -> (variantName: String, experimentId: String?) {
         let configValue = remoteConfig.configValue(forKey: key.rawValue)
         
         // Extract experiment info from Remote Config metadata
@@ -202,7 +164,6 @@ final class FirebaseABTestingManager {
         return (variantName, experimentId)
     }
 }
-
 
 // MARK: - A/B Test Event Tracking
 /// Events for A/B test analytics

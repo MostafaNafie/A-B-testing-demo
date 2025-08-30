@@ -36,9 +36,6 @@ struct HomeScreen: View {
                 }
             }
         }
-        .onAppear {
-            viewModel.onAppear()
-        }
     }
     
     // MARK: - View Components
