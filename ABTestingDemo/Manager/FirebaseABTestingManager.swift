@@ -63,8 +63,22 @@ final class FirebaseABTestingManager {
         )
     }
     
-    func refresh() async {
+    /// Force refresh Remote Config, bypassing cache
+    func forceRefresh() async {
+        // Temporarily set minimum fetch interval to 0 to bypass cache
+        let originalInterval = remoteConfig.configSettings.minimumFetchInterval
+        let settings = RemoteConfigSettings()
+        settings.minimumFetchInterval = 0
+        settings.fetchTimeout = remoteConfig.configSettings.fetchTimeout
+        remoteConfig.configSettings = settings
+        
         await fetchAndActivateConfig()
+        
+        // Restore original settings
+        let restoredSettings = RemoteConfigSettings()
+        restoredSettings.minimumFetchInterval = originalInterval
+        restoredSettings.fetchTimeout = settings.fetchTimeout
+        remoteConfig.configSettings = restoredSettings
     }
     
     func trackEvent(for key: ABTestKey, variant: String, action: String) {
@@ -89,21 +103,42 @@ final class FirebaseABTestingManager {
 private extension FirebaseABTestingManager {
     /// Setup Remote Config with default values and fetch settings
     func setupRemoteConfig() {
-        // Configure fetch settings
+        // Configure fetch settings for optimal caching
         let settings = RemoteConfigSettings()
-        settings.minimumFetchInterval = 0 // For development - set to 3600 for production
+        
+        #if DEBUG
+        // For development - allow frequent fetches to test changes
+        settings.minimumFetchInterval = 60
+        #else
+        // For production - cache for 1 hour to reduce network calls and improve performance
+        settings.minimumFetchInterval = 3600
+        #endif
+        
+        // Set fetch timeout (default is 60 seconds)
+        settings.fetchTimeout = 30
+        
         remoteConfig.configSettings = settings
 
         Task {
-            // Setting custom user properties
+            // Setting custom user properties for better targeting
             try? await remoteConfig.setCustomSignals(["role": "agent"])
-            // Fetch and activate config
+            
+            // Initial fetch and activate - subsequent calls will use cache when appropriate
             await fetchAndActivateConfig()
         }
     }
 
     func fetchAndActivateConfig() async {
         do {
+            // Check if we should fetch based on cache status
+            print(getCacheStatus())
+
+            if isCacheValid() {
+                print("📱 Using cached Remote Config values")
+                triggerValuesUpdated()
+                return
+            }
+            
             print("⏳ Fetching Values from Firebase Remote Config...")
 
             let status = try await remoteConfig.fetchAndActivate()
@@ -117,24 +152,27 @@ private extension FirebaseABTestingManager {
                     print("🔄 Firebase Remote Config fetch completed with status: \(status)")
             }
 
-            print("🔄 Remote Config updated - triggering valuesUpdated publisher")
-            valuesSubject.send()
-
-            #if DEBUG
-            // Log all remote keys for debugging
-            let keys = remoteConfig.allKeys(from: .remote)
-            print("📋 Remote Config Keys (\(keys.count) total):")
-            for key in keys {
-                let val = remoteConfig.configValue(forKey: key)
-                print("  • \(key) = \(val.stringValue)")
-            }
-            #endif
-
+            triggerValuesUpdated()
         } catch {
             print("❌ Firebase Remote Config fetch failed: \(error)")
         }
     }
-    
+
+    func triggerValuesUpdated() {
+        print("🔄 Remote Config updated - triggering valuesUpdated publisher")
+        valuesSubject.send()
+
+        #if DEBUG
+        // Log all remote keys for debugging
+        let keys = remoteConfig.allKeys(from: .remote)
+        print("📋 Remote Config Keys (\(keys.count) total):")
+        for key in keys {
+            let val = remoteConfig.configValue(forKey: key)
+            print("  • \(key) = \(val.stringValue)")
+        }
+        #endif
+    }
+
     func getExperimentInfo(for key: ABTestKey) -> (variantName: String, experimentId: String?) {
         let configValue = remoteConfig.configValue(forKey: key.rawValue)
         
@@ -162,6 +200,43 @@ private extension FirebaseABTestingManager {
         }
         
         return (variantName, experimentId)
+    }
+
+    /// Get detailed cache status information
+    func getCacheStatus() -> String {
+        let cacheInfo = getCacheInfo()
+
+        if let lastFetch = cacheInfo.lastFetchTime {
+            let timeSinceLastFetch = Date().timeIntervalSince(lastFetch)
+            let isValid = isCacheValid()
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .medium
+
+            return """
+            Cache Status: \(isValid ? "✅ Valid" : "⚠️ Expired")
+            Last Fetch: \(formatter.string(from: lastFetch))
+            Time Since Fetch: \(Int(timeSinceLastFetch))s
+            Cache Duration: \(Int(cacheInfo.cacheExpiration))s
+            """
+        } else {
+            return "Cache Status: ❌ No data fetched yet"
+        }
+    }
+
+    /// Get cache information
+    func getCacheInfo() -> (lastFetchTime: Date?, cacheExpiration: TimeInterval) {
+        return (
+            lastFetchTime: remoteConfig.lastFetchTime,
+            cacheExpiration: remoteConfig.configSettings.minimumFetchInterval
+        )
+    }
+
+    /// Check if cache is valid (not expired)
+    func isCacheValid() -> Bool {
+        guard let lastFetch = remoteConfig.lastFetchTime else { return false }
+        let cacheExpiration = remoteConfig.configSettings.minimumFetchInterval
+        return Date().timeIntervalSince(lastFetch) < cacheExpiration
     }
 }
 
