@@ -17,7 +17,7 @@ struct ABTestingDemoApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeScreen()
         }
     }
 }
