@@ -81,6 +81,18 @@ final class FirebaseABTestingManager {
         remoteConfig.configSettings = restoredSettings
     }
     
+    /// Update custom signals and refresh config
+    func setCustomSignals(_ signals: [String: String]) async {
+        do {
+            let customSignals = signals.mapValues { CustomSignalValue(stringLiteral: $0) }
+            try await remoteConfig.setCustomSignals(customSignals)
+            print("✅ Custom signals updated: \(signals)")
+            await forceRefresh()
+        } catch {
+            print("❌ Failed to set custom signals: \(error)")
+        }
+    }
+    
     func trackEvent(for key: ABTestKey, variant: String, action: String) {
         let parameters: [String: Any] = [
             "experiment_key": key.rawValue,
@@ -120,9 +132,6 @@ private extension FirebaseABTestingManager {
         remoteConfig.configSettings = settings
 
         Task {
-            // Setting custom user properties for better targeting
-            try? await remoteConfig.setCustomSignals(["role": "agent"])
-            
             // Initial fetch and activate - subsequent calls will use cache when appropriate
             await fetchAndActivateConfig()
         }

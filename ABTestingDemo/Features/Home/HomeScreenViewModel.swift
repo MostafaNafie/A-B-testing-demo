@@ -53,6 +53,18 @@ class HomeScreenViewModel: ObservableObject {
             }
         }
     }
+    
+    func changeRoleToAgent() {
+        Task {
+            await abTestManager.setCustomSignals(["role": "agent"])
+        }
+    }
+
+    func changeRoleToCustomer() {
+        Task {
+            await abTestManager.setCustomSignals(["role": "customer"])
+        }
+    }
 }
 
 private extension HomeScreenViewModel {

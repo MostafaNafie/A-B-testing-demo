@@ -122,6 +122,31 @@ struct HomeScreen: View {
             .padding()
             .background(Color.gray.opacity(0.05))
             .cornerRadius(8)
+
+            HStack {
+                Button(action: viewModel.changeRoleToCustomer) {
+                    Text("Customer")
+                        .font(.body)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                }
+
+                Button(action: viewModel.changeRoleToAgent) {
+                    Text("Agent")
+                        .font(.body)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green)
+                        .cornerRadius(12)
+                }
+
+            }
         }
     }
 }
